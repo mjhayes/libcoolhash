@@ -2,6 +2,7 @@
 #define __LIBCOOLHASH_COOLHASH_H__
 
 #include <pthread.h>
+#include <stdint.h>
 
 typedef uint64_t coolhash_key_t;
 typedef void (*coolhash_free_foreach_func)(void *data, void *cb_arg);
@@ -39,8 +40,8 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile);
 void coolhash_free(struct coolhash *ch);
 void coolhash_free_foreach(struct coolhash *ch, coolhash_free_foreach_func cb,
         void *cb_arg);
-void coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data);
-void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void *lock);
+int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data);
+void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void **lock);
 int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
                 size_t dst_len);
 void coolhash_del(void *lock);

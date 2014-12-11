@@ -1,3 +1,8 @@
+#include <stdio.h>
+
+#include <stdlib.h>
+#include <string.h>
+
 #include "inc.h"
 
 #define COOLHASH_DEFAULT_PROFILE_SIZE 10 /**< Initial hash table size (should
@@ -5,6 +10,9 @@
 #define COOLHASH_DEFAULT_PROFILE_SHARDS 2 /**< Number of shards */
 
 static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
+                coolhash_key_t key, struct coolhash_table **table_ptr,
+                int nodes_unlock);
+static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
                 coolhash_key_t key);
 static void _coolhash_table_unlock(struct coolhash_table *table);
 static void _coolhash_node_unlock(struct coolhash_node *node);
@@ -26,7 +34,7 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile)
                 return NULL;
 
         if (profile) {
-                memcpy(ch->profile, profile, sizeof(ch->profile));
+                memcpy(&ch->profile, profile, sizeof(ch->profile));
         } else {
                 ch->profile.size = COOLHASH_DEFAULT_PROFILE_SIZE;
                 ch->profile.shards = COOLHASH_DEFAULT_PROFILE_SHARDS;
@@ -56,7 +64,7 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile)
                 ch->tables[i].size = ch->profile.size / ch->profile.shards;
 
                 ch->tables[i].nodes = calloc(ch->tables[i].size,
-                                *ch->tables[i].nodes);
+                                sizeof(*ch->tables[i].nodes));
                 if (ch->tables[i].nodes == NULL)
                         break;
                 if (pthread_mutex_init(&ch->tables[i].table_mx, NULL) != 0)
@@ -154,8 +162,14 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
 
         /* This is a totally new node */
         node = malloc(sizeof(*node));
+        if (node == NULL)
+                return -1;
+
         node->key = key;
-        pthread_mutex_init(&node->node_mx);
+        if (pthread_mutex_init(&node->node_mx, NULL) != 0) {
+                free(node);
+                return -1;
+        }
         node->del = 0;
         node->data = data;
         node->refs = 0; /* Don't hold a reference */
@@ -167,6 +181,7 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
 
 leave:
         _coolhash_table_unlock(table);
+        return 0;
 }
 
 /**
@@ -315,7 +330,7 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
         
         if (ch == NULL) {
                 if (table_ptr)
-                        *table_ptr = NULL
+                        *table_ptr = NULL;
                 return NULL;
         }
 
@@ -353,7 +368,7 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
 static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
                 coolhash_key_t key)
 {
-        return ch->tables[key % ch->profile.shards];
+        return &ch->tables[key % ch->profile.shards];
 }
 
 /* vim: set et ts=8 sw=8 sts=8: */
