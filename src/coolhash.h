@@ -6,6 +6,7 @@
 
 typedef uint64_t coolhash_key_t;
 typedef void (*coolhash_free_foreach_func)(void *data, void *cb_arg);
+typedef void (*coolhash_foreach_func)(void *data, void *lock, void *cb_arg);
 
 struct coolhash_profile {
         long int size; /**< Initial hash table size */

@@ -14,7 +14,9 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
                 int nodes_unlock);
 static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
                 coolhash_key_t key);
+static void _coolhash_table_lock(struct coolhash_table *table);
 static void _coolhash_table_unlock(struct coolhash_table *table);
+static void _coolhash_node_lock(struct coolhash_node *node);
 static void _coolhash_node_unlock(struct coolhash_node *node);
 
 /**
@@ -124,7 +126,7 @@ void coolhash_free_foreach(struct coolhash *ch, coolhash_free_foreach_func cb,
 
                                 if (cb)
                                         cb(n->data, cb_arg);
-                                
+
                                 nn = n->next;
                                 free(n);
                         }
@@ -154,11 +156,10 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
 
                 node->del = 0; /* Could have been scheduled for deletion */
                 node->data = data;
-                node->refs--; /* We don't hold a reference when setting */
                 _coolhash_node_unlock(node);
 
                 goto leave;
-        } 
+        }
 
         /* This is a totally new node */
         node = malloc(sizeof(*node));
@@ -172,8 +173,7 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
         }
         node->del = 0;
         node->data = data;
-        node->refs = 0; /* Don't hold a reference */
-        
+
         /* Add new node */
         idx = key % table->size;
         node->next = table->nodes[idx];
@@ -199,7 +199,7 @@ void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void **lock)
 
         if (ch == NULL || lock == NULL)
                 return NULL;
-        
+
         node =_coolhash_node_find(ch, key, NULL, 1);
         if (node == NULL)
                 return NULL;
@@ -230,7 +230,7 @@ int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
 
         if (ch == NULL || dst == NULL || dst_len <= 0)
                 return -1;
-        
+
         node = _coolhash_node_find(ch, key, NULL, 1);
         if (node == NULL)
                 return -1;
@@ -262,7 +262,6 @@ void coolhash_del(void *lock)
 
         node = lock;
         node->del = 1;
-        node->refs--;
         _coolhash_node_unlock(node);
 }
 
@@ -279,33 +278,82 @@ void coolhash_unlock(void *lock)
                 return;
 
         node = lock;
-        node->refs--;
         _coolhash_node_unlock(node);
 }
 
 /**
- * @brief
+ * @brief Loop through every node in the hash table
  *
- * @param table
+ * @param ch coolhash instance
+ * @param cb Callback function (required) - The callback function must pass
+ * the 'lock' parameter to coolhash_unlock or coolhash_del before returning!
+ * @param cb_arg Callback function argument (optional)
+ */
+void coolhash_foreach(struct coolhash *ch, coolhash_foreach_func cb,
+                void *cb_arg)
+{
+        int i, j;
+        struct coolhash_node *n;
+
+        if (ch == NULL || cb == NULL)
+                return;
+
+        for (i = 0; i < ch->profile.shards; i++) {
+                _coolhash_table_lock(&ch->tables[i]);
+                for (j = 0; j < ch->tables[i].size; j++) {
+                        for (n = ch->tables[i].nodes[j]; n; n = n->next) {
+                                _coolhash_node_lock(n);
+                                if (n->del) {
+                                        _coolhash_node_unlock(n);
+                                        continue;
+                                }
+
+                                cb(n->data, n, cb_arg);
+                                /* The callback needs to unlock or delete the
+                                 * node. */
+                        }
+                }
+                _coolhash_table_unlock(&ch->tables[i]);
+        }
+}
+
+/**
+ * @brief Lock a table
+ *
+ * @param table Table
+ */
+static void _coolhash_table_lock(struct coolhash_table *table)
+{
+        pthread_mutex_lock(&table->table_mx);
+}
+
+/**
+ * @brief Unlock a table
+ *
+ * @param table Table
  */
 static void _coolhash_table_unlock(struct coolhash_table *table)
 {
-        if (table == NULL)
-                return;
-
         pthread_mutex_unlock(&table->table_mx);
 }
 
 /**
- * @brief
+ * @brief Lock a node
  *
- * @param node
+ * @param node Node
+ */
+static void _coolhash_node_lock(struct coolhash_node *node)
+{
+        pthread_mutex_lock(&node->node_mx);
+}
+
+/**
+ * @brief Unlock a node
+ *
+ * @param node Node
  */
 static void _coolhash_node_unlock(struct coolhash_node *node)
 {
-        if (node == NULL)
-                return;
-
         pthread_mutex_unlock(&node->node_mx);
 }
 
@@ -327,29 +375,17 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
         struct coolhash_table *table;
         struct coolhash_node *node;
 
-        
-        if (ch == NULL) {
-                if (table_ptr)
-                        *table_ptr = NULL;
-                return NULL;
-        }
-
         table = _coolhash_table_find(ch, key);
         if (table_ptr)
                 *table_ptr = table;
-
-        if (table == NULL)
-                return NULL;
 
         pthread_mutex_lock(&table->table_mx);
 
         node = table->nodes[key % table->size];
         for (; node->key != key; node = node->next)
                 ;
-        if (node) {
+        if (node)
                 pthread_mutex_lock(&node->node_mx);
-                node->refs++;
-        }
 
         if (nodes_unlock)
                 pthread_mutex_unlock(&table->table_mx);
@@ -358,12 +394,12 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
 }
 
 /**
- * @brief
+ * @brief Find the table 'key' would be in
  *
- * @param ch
- * @param key
+ * @param ch coolhash instance
+ * @param key Key
  *
- * @return
+ * @return The table key would be in
  */
 static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
                 coolhash_key_t key)
