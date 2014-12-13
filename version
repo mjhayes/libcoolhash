@@ -1,0 +1,8 @@
+#!/bin/sh
+
+ver=$(git describe 2>&1)
+if [ $? -eq 0 ]; then
+    echo "$ver"
+else
+    echo "1.0.0"
+fi

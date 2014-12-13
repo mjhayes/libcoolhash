@@ -6,7 +6,7 @@ CC = gcc
 CFLAGS = -Wall -O2 -fPIC -g
 LDFLAGS = -shared
 
-VERSION = $(shell git describe)
+VERSION = $(shell ./version)
 VERSION_MAJOR = $(word 1, $(subst ., ,$(VERSION)))
 VERSION_MINOR = $(word 2, $(subst ., ,$(VERSION)))
 VERSION_RELEASE = $(word 3, $(subst ., ,$(VERSION)))
