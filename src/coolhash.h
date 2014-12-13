@@ -20,7 +20,6 @@ struct coolhash_node {
 
         int del; /**< Set to 1 when scheduled for deletion */
         void *data; /**< Node data */
-        int refs; /**< Number of references to this node */
 };
 
 struct coolhash_table {
