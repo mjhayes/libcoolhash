@@ -31,5 +31,8 @@ install:
 	ln -s $(LIBDIR)/$(LIB_REALNAME) $(DESTDIR)$(LIBDIR)/$(LIB_SONAME)
 	ln -s $(LIBDIR)/$(LIB_SONAME) $(DESTDIR)$(LIBDIR)/$(LIB_LINKERNAME)
 
+test: all
+	cd tests && make test
+
 clean:
 	rm -f $(LIB_REALNAME) src/*.o

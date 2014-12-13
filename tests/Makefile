@@ -17,5 +17,8 @@ $(PROGNAME): $(OBJS)
 
 install:
 
+test: all
+	./$(PROGNAME)
+
 clean:
 	rm -f $(PROGNAME) *.o
