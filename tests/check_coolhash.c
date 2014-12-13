@@ -97,6 +97,37 @@ START_TEST(test_coolhash_set_get)
 }
 END_TEST
 
+START_TEST(test_coolhash_set_del)
+{
+        struct coolhash *ch;
+        struct coolhash_profile profile;
+        int res, var;
+        int *data;
+        void *lock;
+
+        profile.size = 16;
+        profile.shards = 4;
+
+        ch = coolhash_new(&profile);
+        ck_assert_ptr_ne(ch, NULL);
+
+        var = 7;
+        res = coolhash_set(ch, 5, &var);
+        ck_assert_int_eq(res, 0);
+
+        data = coolhash_get(ch, 5, &lock);
+        ck_assert_ptr_ne(data, NULL);
+        ck_assert_int_eq(*data, 7);
+
+        coolhash_del(ch, lock);
+
+        data = coolhash_get(ch, 5, &lock); /* Should not be accessible */
+        ck_assert_ptr_eq(data, NULL);
+
+        coolhash_free(ch);
+}
+END_TEST
+
 Suite *coolhash_suite(void)
 {
         Suite *s;
@@ -108,6 +139,7 @@ Suite *coolhash_suite(void)
         tcase_add_test(tc_core, test_coolhash_new);
         tcase_add_test(tc_core, test_coolhash_new_invalid_size_shards);
         tcase_add_test(tc_core, test_coolhash_set_get);
+        tcase_add_test(tc_core, test_coolhash_set_del);
         suite_add_tcase(s, tc_core);
 
         return s;

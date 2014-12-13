@@ -184,6 +184,7 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
         idx = key % table->size;
         node->next = table->nodes[idx];
         table->nodes[idx] = node;
+        table->n++;
 
 leave:
         _coolhash_table_unlock(table);
@@ -257,10 +258,12 @@ int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
  * do whatever freeing is necessary and you'll then pass the lock pointer
  * to this function.
  *
+ * @param ch coolhash instance
  * @param lock Pointer you got from the 'get' function.
  */
-void coolhash_del(void *lock)
+void coolhash_del(struct coolhash *ch, void *lock)
 {
+        struct coolhash_table *table;
         struct coolhash_node *node;
 
         if (lock == NULL)
@@ -268,6 +271,13 @@ void coolhash_del(void *lock)
 
         node = lock;
         node->del = 1;
+
+        table = _coolhash_table_find(ch, node->key);
+
+        _coolhash_table_lock(table);
+        table->n--;
+        _coolhash_table_unlock(table);
+
         _coolhash_node_unlock(node);
 }
 

@@ -45,7 +45,7 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data);
 void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void **lock);
 int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
                 size_t dst_len);
-void coolhash_del(void *lock);
+void coolhash_del(struct coolhash *ch, void *lock);
 void coolhash_unlock(void *lock);
 
 #endif /* __LIBCOOLHASH_COOLHASH_H__ */
