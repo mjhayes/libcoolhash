@@ -3,7 +3,7 @@ LIBDIR = $(PREFIX)/lib
 INCLUDEDIR = $(PREFIX)/include
 
 CC = gcc
-CFLAGS = -Wall -O2 -fPIC
+CFLAGS = -Wall -O2 -fPIC -g
 LDFLAGS = -shared
 
 VERSION = $(shell git describe)

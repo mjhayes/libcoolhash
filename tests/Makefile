@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -O2
+CFLAGS = -Wall -O2 -g
 LIBS = -lcheck $(wildcard ../libcoolhash.so*)
 LDFLAGS =
 

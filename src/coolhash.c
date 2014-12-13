@@ -52,8 +52,6 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile)
         if (ch->profile.size % ch->profile.shards != 0)
                 ch->profile.size += ch->profile.size % ch->profile.shards;
 
-        printf("size %ld shards %ld\n", ch->profile.size, ch->profile.shards);
-
         /* Initialize hash tables */
         ch->tables = calloc(ch->profile.shards, sizeof(*ch->tables));
         if (ch->tables == NULL) {
@@ -131,7 +129,12 @@ void coolhash_free_foreach(struct coolhash *ch, coolhash_free_foreach_func cb,
                                 free(n);
                         }
                 }
+
+                free(ch->tables[i].nodes);
         }
+
+        free(ch->tables);
+        free(ch);
 }
 
 /**
@@ -148,6 +151,9 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
         struct coolhash_node *node;
         struct coolhash_table *table;
         unsigned int idx;
+
+        if (ch == NULL || data == NULL)
+                return -1;
 
         node = _coolhash_node_find(ch, key, &table, 0);
         if (node) {
@@ -382,7 +388,7 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
         pthread_mutex_lock(&table->table_mx);
 
         node = table->nodes[key % table->size];
-        for (; node->key != key; node = node->next)
+        for (; node && node->key != key; node = node->next)
                 ;
         if (node)
                 pthread_mutex_lock(&node->node_mx);
