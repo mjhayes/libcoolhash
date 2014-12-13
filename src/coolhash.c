@@ -11,7 +11,7 @@
 
 static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
                 coolhash_key_t key, struct coolhash_table **table_ptr,
-                int nodes_unlock);
+                int table_unlock);
 static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
                 coolhash_key_t key);
 static void _coolhash_table_lock(struct coolhash_table *table);
@@ -380,13 +380,13 @@ static void _coolhash_node_unlock(struct coolhash_node *node)
  * @param ch
  * @param key
  * @param table_ptr Fill in a table pointer if you need this info
- * @param nodes_unlock Boolean, unlock the nodes mutex when done?
+ * @param table_unlock Boolean, unlock the table when done?
  *
  * @return
  */
 static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
                 coolhash_key_t key, struct coolhash_table **table_ptr,
-                int nodes_unlock)
+                int table_unlock)
 {
         struct coolhash_table *table;
         struct coolhash_node *node;
@@ -395,16 +395,16 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
         if (table_ptr)
                 *table_ptr = table;
 
-        pthread_mutex_lock(&table->table_mx);
+        _coolhash_table_lock(table);
 
         node = table->nodes[key % table->size];
         for (; node && node->key != key; node = node->next)
                 ;
         if (node)
-                pthread_mutex_lock(&node->node_mx);
+                _coolhash_node_lock(node);
 
         if (nodes_unlock)
-                pthread_mutex_unlock(&table->table_mx);
+                _coolhash_table_unlock(table);
 
         return node;
 }
