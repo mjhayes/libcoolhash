@@ -1,5 +1,3 @@
-#include <stdio.h>
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -403,7 +401,7 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
         if (node)
                 _coolhash_node_lock(node);
 
-        if (nodes_unlock)
+        if (table_unlock)
                 _coolhash_table_unlock(table);
 
         return node;
