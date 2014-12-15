@@ -97,9 +97,9 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile)
 }
 
 /**
- * @brief
+ * @brief Free coolhash instance
  *
- * @param ch
+ * @param ch coolhash instance
  */
 void coolhash_free(struct coolhash *ch)
 {
@@ -107,9 +107,9 @@ void coolhash_free(struct coolhash *ch)
 }
 
 /**
- * @brief
+ * @brief Initialize coolhash profile with defaults
  *
- * @param profile
+ * @param profile coolhash profile
  */
 void coolhash_profile_init(struct coolhash_profile *profile)
 {
@@ -119,10 +119,10 @@ void coolhash_profile_init(struct coolhash_profile *profile)
 }
 
 /**
- * @brief
+ * @brief Set initial and minimum hash table size
  *
- * @param profile
- * @param size
+ * @param profile coolhash profile
+ * @param size Initial and minimum size
  */
 void coolhash_profile_set_size(struct coolhash_profile *profile,
                 unsigned int size)
@@ -131,11 +131,11 @@ void coolhash_profile_set_size(struct coolhash_profile *profile,
 }
 
 /**
- * @brief
+ * @brief Get initial and minimum hash table size
  *
- * @param profile
+ * @param profile coolhash profile
  *
- * @return
+ * @return size
  */
 unsigned int coolhash_profile_get_size(struct coolhash_profile *profile)
 {
@@ -143,10 +143,10 @@ unsigned int coolhash_profile_get_size(struct coolhash_profile *profile)
 }
 
 /**
- * @brief
+ * @brief Set number of shards
  *
- * @param profile
- * @param shards
+ * @param profile coolhash profile
+ * @param shards Number of shards
  */
 void coolhash_profile_set_shards(struct coolhash_profile *profile,
                 unsigned int shards)
@@ -155,11 +155,11 @@ void coolhash_profile_set_shards(struct coolhash_profile *profile,
 }
 
 /**
- * @brief
+ * @brief Get number of shards
  *
- * @param profile
+ * @param profile coolhash profile
  *
- * @return
+ * @return shards
  */
 unsigned int coolhash_profile_get_shards(struct coolhash_profile *profile)
 {
@@ -167,10 +167,10 @@ unsigned int coolhash_profile_get_shards(struct coolhash_profile *profile)
 }
 
 /**
- * @brief
+ * @brief Set load factor (percent); amount of load before rehash
  *
- * @param profile
- * @param load_factor
+ * @param profile coolhash profile
+ * @param load_factor Load factor
  */
 void coolhash_profile_set_load_factor(struct coolhash_profile *profile,
                 int load_factor)
@@ -179,11 +179,11 @@ void coolhash_profile_set_load_factor(struct coolhash_profile *profile,
 }
 
 /**
- * @brief
+ * @brief Get load factor
  *
- * @param profile
+ * @param profile coolhash profile
  *
- * @return
+ * @return Load factor
  */
 int coolhash_profile_get_load_factor(struct coolhash_profile *profile)
 {
@@ -191,11 +191,12 @@ int coolhash_profile_get_load_factor(struct coolhash_profile *profile)
 }
 
 /**
- * @brief
+ * @brief Free coolhash instance, but execute a callback for each item so
+ * that extra cleanup can be performed
  *
- * @param ch
- * @param cb
- * @param cb_arg
+ * @param ch coolhash instance
+ * @param cb callback to execute
+ * @param cb_arg argument to pass to callback (optional)
  */
 void coolhash_free_foreach(struct coolhash *ch, coolhash_free_foreach_func cb,
         void *cb_arg)
@@ -229,13 +230,13 @@ void coolhash_free_foreach(struct coolhash *ch, coolhash_free_foreach_func cb,
 }
 
 /**
- * @brief
+ * @brief Add/replace item in hash table
  *
- * @param ch
- * @param key
- * @param data
+ * @param ch coolhash instance
+ * @param key Hashed key
+ * @param data Pointer to your data
  *
- * @return
+ * @return Non-zero error (likely no memory)
  */
 int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
 {
@@ -281,13 +282,14 @@ leave:
 }
 
 /**
- * @brief
+ * @brief Retrieve item from hash table
  *
- * @param ch
- * @param key
- * @param lock
+ * @param ch coolhash instance
+ * @param key Hashed key
+ * @param lock Pointer to void pointer; you must pass this to coolhash_unlock
+ * or coolhash_del when you are done with the returned item
  *
- * @return
+ * @return Pointer to data or NULL if item not found
  */
 void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void **lock)
 {
@@ -310,14 +312,14 @@ void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void **lock)
 }
 
 /**
- * @brief Get data and copy into destination buffer
+ * @brief Retrieve item from hash table and copy data into destination buffer
  *
- * @param ch
- * @param key
- * @param dst
- * @param dst_len
+ * @param ch coolhash instance
+ * @param key Hashed key
+ * @param dst Destination buffer
+ * @param dst_len Buffer length
  *
- * @return
+ * @return Non-zero failure (item not found)
  */
 int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
                 size_t dst_len)
@@ -343,7 +345,7 @@ int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
 }
 
 /**
- * @brief So, to delete a node you need to 'get' it first. That's so you can
+ * @brief So, to delete an item you need to 'get' it first. That's so you can
  * do whatever freeing is necessary and you'll then pass the lock pointer
  * to this function.
  *
@@ -372,7 +374,7 @@ void coolhash_del(struct coolhash *ch, void *lock)
 }
 
 /**
- * @brief Unlock after a 'get'
+ * @brief Unlock item after a 'get'
  *
  * @param ch coolhash instance
  * @param lock Pointer you got from the 'get' function.
@@ -448,12 +450,12 @@ static void _coolhash_node_unlock(struct coolhash_node *node)
  * @brief Find node - make sure to unlock the node_mx when done (if a node is
  * found)
  *
- * @param ch
- * @param key
+ * @param ch coolhash instance
+ * @param key Hashed key
  * @param table_ptr Fill in a table pointer if you need this info
  * @param table_unlock Boolean, unlock the table when done?
  *
- * @return
+ * @return Found node or NULL if not found
  */
 static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
                 coolhash_key_t key, struct coolhash_table **table_ptr,
@@ -481,10 +483,10 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
 }
 
 /**
- * @brief
+ * @brief Add item to a table shard
  *
- * @param table
- * @param node
+ * @param table Table
+ * @param node Node to add
  */
 static void _coolhash_table_add(struct coolhash_table *table,
                 struct coolhash_node *node)
@@ -511,10 +513,10 @@ static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
 }
 
 /**
- * @brief
+ * @brief Calculate the grow- and shrink-at counts (for auto-rehashing)
  *
- * @param ch
- * @param table
+ * @param ch coolhash instance
+ * @param table Table to calculate for
  */
 static void _coolhash_table_grow_shrink_calc(struct coolhash *ch,
                 struct coolhash_table *table)
@@ -549,10 +551,10 @@ static void _coolhash_table_unlock(struct coolhash_table *table)
 }
 
 /**
- * @brief
+ * @brief Rehash a table if it needs to be
  *
- * @param ch
- * @param table
+ * @param ch coolhash instance
+ * @param table Table to rehash
  */
 static void _coolhash_table_auto_rehash(struct coolhash *ch,
                 struct coolhash_table *table)
