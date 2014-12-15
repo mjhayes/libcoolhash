@@ -201,6 +201,7 @@ START_TEST(test_coolhash_auto_rehash)
         res = coolhash_set(ch, 12, &var4);
         ck_assert_int_eq(res, 0);
 
+        /* All the items should be in table shard [0] (0 % 4 == 0, etc.) */
         ck_assert_uint_eq(ch->tables[0].size, 8); /* Should have doubled */
 
         /* Make sure we can retrieve our items */

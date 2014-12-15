@@ -1,5 +1,3 @@
-#include <stdio.h>
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +23,7 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
                 int table_unlock);
 static void _coolhash_node_lock(struct coolhash_node *node);
 static void _coolhash_node_unlock(struct coolhash_node *node);
+static void _coolhash_profile_make_sane(struct coolhash_profile *profile);
 
 /**
  * @brief Initialize new coolhash instance
@@ -48,16 +47,7 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile)
                 coolhash_profile_init(&ch->profile);
 
         /* Make configuration values sane if they aren't already */
-        if (ch->profile.size <= 0)
-                ch->profile.size = 1;
-        if (ch->profile.shards < 1)
-                ch->profile.shards = 1;
-        if (ch->profile.size < ch->profile.shards)
-                ch->profile.size = ch->profile.shards;
-        if (ch->profile.size % ch->profile.shards != 0)
-                ch->profile.size += ch->profile.size % ch->profile.shards;
-        if (ch->profile.load_factor <= 0)
-                ch->profile.load_factor = COOLHASH_DEFAULT_PROFILE_LOAD_FACTOR;
+        _coolhash_profile_make_sane(&ch->profile);
 
         /* Initialize hash tables */
         ch->tables = calloc(ch->profile.shards, sizeof(*ch->tables));
@@ -607,6 +597,25 @@ static void _coolhash_table_auto_rehash(struct coolhash *ch,
         }
 
         free(oldnodes);
+}
+
+/**
+ * @brief Sanitize a profile
+ *
+ * @param profile Profile to sanitize
+ */
+static void _coolhash_profile_make_sane(struct coolhash_profile *profile)
+{
+        if (profile->size <= 0)
+                profile->size = 1;
+        if (profile->shards < 1)
+                profile->shards = 1;
+        if (profile->size < profile->shards)
+                profile->size = profile->shards;
+        if (profile->size % profile->shards != 0)
+                profile->size += profile->size % profile->shards;
+        if (profile->load_factor <= 0)
+                profile->load_factor = COOLHASH_DEFAULT_PROFILE_LOAD_FACTOR;
 }
 
 /* vim: set et ts=8 sw=8 sts=8: */
