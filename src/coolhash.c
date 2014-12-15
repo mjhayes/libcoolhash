@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -6,14 +8,21 @@
 #define COOLHASH_DEFAULT_PROFILE_SIZE 10 /**< Initial hash table size (should
                                            be exactly divisible by SHARDS */
 #define COOLHASH_DEFAULT_PROFILE_SHARDS 2 /**< Number of shards */
+#define COOLHASH_DEFAULT_PROFILE_LOAD_FACTOR 80 /**< Load factor (percent) */
 
-static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
-                coolhash_key_t key, struct coolhash_table **table_ptr,
-                int table_unlock);
+static void _coolhash_table_add(struct coolhash_table *table,
+                struct coolhash_node *node);
 static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
                 coolhash_key_t key);
 static void _coolhash_table_lock(struct coolhash_table *table);
 static void _coolhash_table_unlock(struct coolhash_table *table);
+static void _coolhash_table_auto_rehash(struct coolhash *ch,
+                struct coolhash_table *table);
+static void _coolhash_table_grow_shrink_calc(struct coolhash *ch,
+                struct coolhash_table *table);
+static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
+                coolhash_key_t key, struct coolhash_table **table_ptr,
+                int table_unlock);
 static void _coolhash_node_lock(struct coolhash_node *node);
 static void _coolhash_node_unlock(struct coolhash_node *node);
 
@@ -27,18 +36,16 @@ static void _coolhash_node_unlock(struct coolhash_node *node);
 struct coolhash *coolhash_new(struct coolhash_profile *profile)
 {
         struct coolhash *ch;
-        int i;
+        unsigned int i, j;
 
         ch = malloc(sizeof(*ch));
         if (ch == NULL)
                 return NULL;
 
-        if (profile) {
+        if (profile)
                 memcpy(&ch->profile, profile, sizeof(ch->profile));
-        } else {
-                ch->profile.size = COOLHASH_DEFAULT_PROFILE_SIZE;
-                ch->profile.shards = COOLHASH_DEFAULT_PROFILE_SHARDS;
-        }
+        else
+                coolhash_profile_init(&ch->profile);
 
         /* Make configuration values sane if they aren't already */
         if (ch->profile.size <= 0)
@@ -49,6 +56,8 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile)
                 ch->profile.size = ch->profile.shards;
         if (ch->profile.size % ch->profile.shards != 0)
                 ch->profile.size += ch->profile.size % ch->profile.shards;
+        if (ch->profile.load_factor <= 0)
+                ch->profile.load_factor = COOLHASH_DEFAULT_PROFILE_LOAD_FACTOR;
 
         /* Initialize hash tables */
         ch->tables = calloc(ch->profile.shards, sizeof(*ch->tables));
@@ -60,28 +69,28 @@ struct coolhash *coolhash_new(struct coolhash_profile *profile)
         for (i = 0; i < ch->profile.shards; i++) {
                 ch->tables[i].n = 0;
                 ch->tables[i].size = ch->profile.size / ch->profile.shards;
+                _coolhash_table_grow_shrink_calc(ch, &ch->tables[i]);
 
                 ch->tables[i].nodes = calloc(ch->tables[i].size,
                                 sizeof(*ch->tables[i].nodes));
                 if (ch->tables[i].nodes == NULL)
                         break;
-                if (pthread_mutex_init(&ch->tables[i].table_mx, NULL) != 0)
+                if (pthread_mutex_init(&ch->tables[i].table_mx, NULL) != 0) {
+                        free(ch->tables[i].nodes);
                         break;
+                }
         }
 
         /* There was a failure, free up memory */
         if (i < ch->profile.shards) {
-                free(ch->tables[i].nodes);
-                i--;
-
-                for (; i >= 0; i--) {
-                        free(ch->tables[i].nodes);
-                        pthread_mutex_destroy(&ch->tables[i].table_mx);
+                for (j = 0; j < i - 1; j++) {
+                        free(ch->tables[j].nodes);
+                        pthread_mutex_destroy(&ch->tables[j].table_mx);
                 }
 
                 free(ch->tables);
                 free(ch);
-                ch = NULL;
+                return NULL;
         }
 
         return ch;
@@ -100,6 +109,90 @@ void coolhash_free(struct coolhash *ch)
 /**
  * @brief
  *
+ * @param profile
+ */
+void coolhash_profile_init(struct coolhash_profile *profile)
+{
+        profile->size = COOLHASH_DEFAULT_PROFILE_SIZE;
+        profile->shards = COOLHASH_DEFAULT_PROFILE_SHARDS;
+        profile->load_factor = COOLHASH_DEFAULT_PROFILE_LOAD_FACTOR;
+}
+
+/**
+ * @brief
+ *
+ * @param profile
+ * @param size
+ */
+void coolhash_profile_set_size(struct coolhash_profile *profile,
+                unsigned int size)
+{
+        profile->size = size;
+}
+
+/**
+ * @brief
+ *
+ * @param profile
+ *
+ * @return
+ */
+unsigned int coolhash_profile_get_size(struct coolhash_profile *profile)
+{
+        return profile->size;
+}
+
+/**
+ * @brief
+ *
+ * @param profile
+ * @param shards
+ */
+void coolhash_profile_set_shards(struct coolhash_profile *profile,
+                unsigned int shards)
+{
+        profile->shards = shards;
+}
+
+/**
+ * @brief
+ *
+ * @param profile
+ *
+ * @return
+ */
+unsigned int coolhash_profile_get_shards(struct coolhash_profile *profile)
+{
+        return profile->shards;
+}
+
+/**
+ * @brief
+ *
+ * @param profile
+ * @param load_factor
+ */
+void coolhash_profile_set_load_factor(struct coolhash_profile *profile,
+                int load_factor)
+{
+        profile->load_factor = load_factor;
+}
+
+/**
+ * @brief
+ *
+ * @param profile
+ *
+ * @return
+ */
+int coolhash_profile_get_load_factor(struct coolhash_profile *profile)
+{
+        return profile->load_factor;
+}
+
+/**
+ * @brief
+ *
  * @param ch
  * @param cb
  * @param cb_arg
@@ -107,7 +200,7 @@ void coolhash_free(struct coolhash *ch)
 void coolhash_free_foreach(struct coolhash *ch, coolhash_free_foreach_func cb,
         void *cb_arg)
 {
-        int i, j;
+        unsigned int i, j;
         struct coolhash_node *n, *nn;
 
         if (ch == NULL)
@@ -148,7 +241,6 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
 {
         struct coolhash_node *node;
         struct coolhash_table *table;
-        unsigned int idx;
 
         if (ch == NULL || data == NULL)
                 return -1;
@@ -179,10 +271,9 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
         node->data = data;
 
         /* Add new node */
-        idx = key % table->size;
-        node->next = table->nodes[idx];
-        table->nodes[idx] = node;
+        _coolhash_table_add(table, node);
         table->n++;
+        _coolhash_table_auto_rehash(ch, table);
 
 leave:
         _coolhash_table_unlock(table);
@@ -274,6 +365,7 @@ void coolhash_del(struct coolhash *ch, void *lock)
 
         _coolhash_table_lock(table);
         table->n--;
+        _coolhash_table_auto_rehash(ch, table);
         _coolhash_table_unlock(table);
 
         _coolhash_node_unlock(node);
@@ -282,9 +374,10 @@ void coolhash_del(struct coolhash *ch, void *lock)
 /**
  * @brief Unlock after a 'get'
  *
+ * @param ch coolhash instance
  * @param lock Pointer you got from the 'get' function.
  */
-void coolhash_unlock(void *lock)
+void coolhash_unlock(struct coolhash *ch, void *lock)
 {
         struct coolhash_node *node;
 
@@ -306,7 +399,7 @@ void coolhash_unlock(void *lock)
 void coolhash_foreach(struct coolhash *ch, coolhash_foreach_func cb,
                 void *cb_arg)
 {
-        int i, j;
+        unsigned int i, j;
         struct coolhash_node *n;
 
         if (ch == NULL || cb == NULL)
@@ -322,33 +415,13 @@ void coolhash_foreach(struct coolhash *ch, coolhash_foreach_func cb,
                                         continue;
                                 }
 
-                                cb(n->data, n, cb_arg);
+                                cb(ch, n->key, n->data, n, cb_arg);
                                 /* The callback needs to unlock or delete the
                                  * node. */
                         }
                 }
                 _coolhash_table_unlock(&ch->tables[i]);
         }
-}
-
-/**
- * @brief Lock a table
- *
- * @param table Table
- */
-static void _coolhash_table_lock(struct coolhash_table *table)
-{
-        pthread_mutex_lock(&table->table_mx);
-}
-
-/**
- * @brief Unlock a table
- *
- * @param table Table
- */
-static void _coolhash_table_unlock(struct coolhash_table *table)
-{
-        pthread_mutex_unlock(&table->table_mx);
 }
 
 /**
@@ -408,6 +481,22 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
 }
 
 /**
+ * @brief
+ *
+ * @param table
+ * @param node
+ */
+static void _coolhash_table_add(struct coolhash_table *table,
+                struct coolhash_node *node)
+{
+        unsigned int idx;
+
+        idx = (unsigned int) (node->key % (coolhash_key_t) table->size);
+        node->next = table->nodes[idx];
+        table->nodes[idx] = node;
+}
+
+/**
  * @brief Find the table 'key' would be in
  *
  * @param ch coolhash instance
@@ -419,6 +508,103 @@ static struct coolhash_table *_coolhash_table_find(struct coolhash *ch,
                 coolhash_key_t key)
 {
         return &ch->tables[key % ch->profile.shards];
+}
+
+/**
+ * @brief
+ *
+ * @param ch
+ * @param table
+ */
+static void _coolhash_table_grow_shrink_calc(struct coolhash *ch,
+                struct coolhash_table *table)
+{
+        table->grow_at = (unsigned int)
+                ((uint64_t) table->size * ch->profile.load_factor / 100);
+
+        if (table->size <= ch->profile.size / ch->profile.shards)
+                table->shrink_at = 0;
+        else
+                table->shrink_at = table->grow_at / 5;
+}
+
+/**
+ * @brief Lock a table
+ *
+ * @param table Table
+ */
+static void _coolhash_table_lock(struct coolhash_table *table)
+{
+        pthread_mutex_lock(&table->table_mx);
+}
+
+/**
+ * @brief Unlock a table
+ *
+ * @param table Table
+ */
+static void _coolhash_table_unlock(struct coolhash_table *table)
+{
+        pthread_mutex_unlock(&table->table_mx);
+}
+
+/**
+ * @brief
+ *
+ * @param ch
+ * @param table
+ */
+static void _coolhash_table_auto_rehash(struct coolhash *ch,
+                struct coolhash_table *table)
+{
+        unsigned int i, nsize, oldsize;
+        struct coolhash_node *node, *noden, **oldnodes;
+
+        if (table->n > table->grow_at)
+                nsize = table->size * 2;
+        else if (table->n < table->shrink_at)
+                nsize = table->size / 2;
+        else
+                return;
+
+        oldnodes = table->nodes;
+        table->nodes = calloc(nsize, sizeof(*table->nodes));
+        if (table->nodes == NULL) {
+                /* Apparently there was not enough memory available to
+                 * perform this allocation. Abort! */
+                table->nodes = oldnodes;
+                return;
+        }
+
+        oldsize = table->size;
+        table->size = nsize;
+        _coolhash_table_grow_shrink_calc(ch, table);
+
+        /* Move nodes to new table and remove nodes marked for deletion */
+        for (i = 0; i < oldsize; i++) {
+                if (oldnodes[i] == NULL)
+                        continue;
+
+                for (node = oldnodes[i]; node; node = noden) {
+                        noden = node->next;
+
+                        _coolhash_node_lock(node); /* Just grab the lock to
+                                                      wait for the last
+                                                      reference to go away. */
+                        _coolhash_node_unlock(node);
+
+                        if (node->del) { /* Free this node */
+                                pthread_mutex_destroy(&node->node_mx);
+                                free(node);
+                                continue;
+                        }
+
+                        /* Move the node to the new table */
+                        _coolhash_table_add(table, node);
+                }
+        }
+
+        free(oldnodes);
 }
 
 /* vim: set et ts=8 sw=8 sts=8: */
