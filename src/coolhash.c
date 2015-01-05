@@ -20,8 +20,8 @@ static void _coolhash_table_grow_shrink_calc(struct coolhash *ch,
                 struct coolhash_table *table);
 static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
                 coolhash_key_t key, struct coolhash_table **table_ptr,
-                int table_unlock);
-static void _coolhash_node_lock(struct coolhash_node *node);
+                int table_unlock, int ro);
+static void _coolhash_node_lock(struct coolhash_node *node, int ro);
 static void _coolhash_node_unlock(struct coolhash_node *node);
 static void _coolhash_profile_make_sane(struct coolhash_profile *profile);
 
@@ -236,7 +236,7 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
         if (ch == NULL || data == NULL)
                 return -1;
 
-        node = _coolhash_node_find(ch, key, &table, 0);
+        node = _coolhash_node_find(ch, key, &table, 0, 0);
         if (node) {
                 /* A node already exists. We just need to overwrite the data
                  * and make sure to unschedule deletion if that's the case. */
@@ -254,7 +254,7 @@ int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data)
                 return -1;
 
         node->key = key;
-        if (pthread_mutex_init(&node->node_mx, NULL) != 0) {
+        if (pthread_rwlock_init(&node->node_mx, NULL) != 0) {
                 free(node);
                 return -1;
         }
@@ -288,7 +288,39 @@ void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void **lock)
         if (ch == NULL || lock == NULL)
                 return NULL;
 
-        node =_coolhash_node_find(ch, key, NULL, 1);
+        node =_coolhash_node_find(ch, key, NULL, 1, 0);
+        if (node == NULL)
+                return NULL;
+
+        if (node->del) {
+                _coolhash_node_unlock(node);
+                return NULL;
+        }
+
+        *lock = node;
+        return node->data;
+}
+
+/**
+ * @brief Retrieve item from hash table, read-only.
+ * This means you should not perform any modifications on the data returned.
+ *
+ * @param ch coolhash instance
+ * @param key Hashed key
+ * @param lock Pointer to void pointer; you must pass this to coolhash_unlock
+ * when you are done with the returned item
+ *
+ * @return Pointer to data or NULL if item not found
+ */
+void *coolhash_get_ro(struct coolhash *ch, coolhash_key_t key,
+                void **lock)
+{
+        struct coolhash_node *node;
+
+        if (ch == NULL || lock == NULL)
+                return NULL;
+
+        node =_coolhash_node_find(ch, key, NULL, 1, 0);
         if (node == NULL)
                 return NULL;
 
@@ -319,7 +351,7 @@ int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
         if (ch == NULL || dst == NULL || dst_len <= 0)
                 return -1;
 
-        node = _coolhash_node_find(ch, key, NULL, 1);
+        node = _coolhash_node_find(ch, key, NULL, 1, 1);
         if (node == NULL)
                 return -1;
 
@@ -401,7 +433,44 @@ void coolhash_foreach(struct coolhash *ch, coolhash_foreach_func cb,
                 _coolhash_table_lock(&ch->tables[i]);
                 for (j = 0; j < ch->tables[i].size; j++) {
                         for (n = ch->tables[i].nodes[j]; n; n = n->next) {
-                                _coolhash_node_lock(n);
+                                _coolhash_node_lock(n, 0);
+                                if (n->del) {
+                                        _coolhash_node_unlock(n);
+                                        continue;
+                                }
+
+                                cb(ch, n->key, n->data, n, cb_arg);
+                                /* The callback needs to unlock or delete the
+                                 * node. */
+                        }
+                }
+                _coolhash_table_unlock(&ch->tables[i]);
+        }
+}
+
+/**
+ * @brief Loop through every node in the hash table, read-only!
+ * This means you are not going to be deleting or modifying any data!
+ *
+ * @param ch coolhash instance
+ * @param cb Callback function (required) - The callback function must pass
+ * the 'lock' parameter to coolhash_unlock before returning!
+ * @param cb_arg Callback function argument (optional)
+ */
+void coolhash_foreach_ro(struct coolhash *ch, coolhash_foreach_func cb,
+                void *cb_arg)
+{
+        unsigned int i, j;
+        struct coolhash_node *n;
+
+        if (ch == NULL || cb == NULL)
+                return;
+
+        for (i = 0; i < ch->profile.shards; i++) {
+                _coolhash_table_lock(&ch->tables[i]);
+                for (j = 0; j < ch->tables[i].size; j++) {
+                        for (n = ch->tables[i].nodes[j]; n; n = n->next) {
+                                _coolhash_node_lock(n, 1);
                                 if (n->del) {
                                         _coolhash_node_unlock(n);
                                         continue;
@@ -420,10 +489,14 @@ void coolhash_foreach(struct coolhash *ch, coolhash_foreach_func cb,
  * @brief Lock a node
  *
  * @param node Node
+ * @param ro Read-only?
  */
-static void _coolhash_node_lock(struct coolhash_node *node)
+static void _coolhash_node_lock(struct coolhash_node *node, int ro)
 {
-        pthread_mutex_lock(&node->node_mx);
+        if (ro)
+                pthread_rwlock_rdlock(&node->node_mx);
+        else
+                pthread_rwlock_wrlock(&node->node_mx);
 }
 
 /**
@@ -433,7 +506,7 @@ static void _coolhash_node_lock(struct coolhash_node *node)
  */
 static void _coolhash_node_unlock(struct coolhash_node *node)
 {
-        pthread_mutex_unlock(&node->node_mx);
+        pthread_rwlock_unlock(&node->node_mx);
 }
 
 /**
@@ -444,12 +517,13 @@ static void _coolhash_node_unlock(struct coolhash_node *node)
  * @param key Hashed key
  * @param table_ptr Fill in a table pointer if you need this info
  * @param table_unlock Boolean, unlock the table when done?
+ * @param ro Boolean, readonly?
  *
  * @return Found node or NULL if not found
  */
 static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
                 coolhash_key_t key, struct coolhash_table **table_ptr,
-                int table_unlock)
+                int table_unlock, int ro)
 {
         struct coolhash_table *table;
         struct coolhash_node *node;
@@ -464,7 +538,7 @@ static struct coolhash_node *_coolhash_node_find(struct coolhash *ch,
         for (; node && node->key != key; node = node->next)
                 ;
         if (node)
-                _coolhash_node_lock(node);
+                _coolhash_node_lock(node, ro);
 
         if (table_unlock)
                 _coolhash_table_unlock(table);
@@ -580,13 +654,14 @@ static void _coolhash_table_auto_rehash(struct coolhash *ch,
                 for (node = oldnodes[i]; node; node = noden) {
                         noden = node->next;
 
-                        _coolhash_node_lock(node); /* Just grab the lock to
-                                                      wait for the last
-                                                      reference to go away. */
+                        _coolhash_node_lock(node, 0); /* Just grab the lock to
+                                                         wait for the last
+                                                         reference to go away.
+                                                         */
                         _coolhash_node_unlock(node);
 
                         if (node->del) { /* Free this node */
-                                pthread_mutex_destroy(&node->node_mx);
+                                pthread_rwlock_destroy(&node->node_mx);
                                 free(node);
                                 continue;
                         }

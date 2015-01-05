@@ -20,7 +20,7 @@ struct coolhash_profile {
 struct coolhash_node {
         coolhash_key_t key; /**< Node key */
         struct coolhash_node *next; /**< Next node */
-        pthread_mutex_t node_mx;
+        pthread_rwlock_t node_mx;
 
         int del; /**< Set to 1 when scheduled for deletion */
         void *data; /**< Node data */
@@ -58,11 +58,15 @@ void coolhash_profile_set_load_factor(struct coolhash_profile *profile,
 int coolhash_profile_get_load_factor(struct coolhash_profile *profile);
 int coolhash_set(struct coolhash *ch, coolhash_key_t key, void *data);
 void *coolhash_get(struct coolhash *ch, coolhash_key_t key, void **lock);
+void *coolhash_get_ro(struct coolhash *ch, coolhash_key_t key,
+                void **lock);
 int coolhash_get_copy(struct coolhash *ch, coolhash_key_t key, void *dst,
                 size_t dst_len);
 void coolhash_del(struct coolhash *ch, void *lock);
 void coolhash_unlock(struct coolhash *ch, void *lock);
 void coolhash_foreach(struct coolhash *ch, coolhash_foreach_func cb,
+                void *cb_arg);
+void coolhash_foreach_ro(struct coolhash *ch, coolhash_foreach_func cb,
                 void *cb_arg);
 
 #endif /* __LIBCOOLHASH_COOLHASH_H__ */

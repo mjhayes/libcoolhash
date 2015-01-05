@@ -1,1 +1,11 @@
-Not ready for use
+Not ready for use!
+
+--
+
+libcoolhash
+
+This is a sharded hash table implementation made specifically for use in
+multi-threaded applications that share a hash table between threads.
+
+Sharding helps reduce lock contention and allows for greater parallelization
+when accessing shared hash table nodes.
